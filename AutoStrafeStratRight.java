@@ -1,0 +1,122 @@
+package org.firstinspires.ftc.teamcode.drive.Auton;
+
+import com.acmerobotics.roadrunner.geometry.Pose2d;
+import com.acmerobotics.roadrunner.geometry.Vector2d;
+import com.acmerobotics.roadrunner.trajectory.Trajectory;
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.util.ElapsedTime;
+
+import org.firstinspires.ftc.teamcode.drive.SampleMecanumDrive;
+import org.firstinspires.ftc.teamcode.drive.opmode.Subsystems.Claw;
+import org.firstinspires.ftc.teamcode.drive.opmode.Subsystems.Lift;
+import org.firstinspires.ftc.teamcode.trajectorysequence.TrajectorySequence;
+
+
+@Autonomous
+public class AutoStrafeStratRight extends LinearOpMode
+{
+    Lift lift;
+    SampleMecanumDrive drive;
+    Claw claw;
+    GetDetection detec= new GetDetection();
+    ElapsedTime timer1 = new ElapsedTime();
+
+    Pose2d startPose = new Pose2d(35.56, -62.67, Math.toRadians(90.00));
+
+    enum State {
+        Dep_Traj,
+        Park_Traj,
+        Parking
+    }
+
+    State state = State.Dep_Traj;
+    @Override
+    public void runOpMode() throws InterruptedException
+    {
+        drive = new SampleMecanumDrive(hardwareMap);
+        lift = new Lift(hardwareMap);
+        claw = new Claw(hardwareMap);
+        detec.initCamera(hardwareMap);
+        TrajectorySequence TrajMove1 = drive.trajectorySequenceBuilder(startPose)
+                .lineTo(new Vector2d(11.62, -61.09))
+                .addDisplacementMarker(() -> {
+                    lift.setPosition(1025);
+                })
+                .lineToLinearHeading((new Pose2d(9.39, -35.56, Math.toRadians(130))))
+                .waitSeconds(0.25)
+                .lineTo(new Vector2d(3.52, -28.69))
+                .addTemporalMarker(10.25, () -> {
+                    claw.open();
+                })
+                .build();
+
+        TrajectorySequence Park1 = drive.trajectorySequenceBuilder(TrajMove1.end())
+                .waitSeconds(0.4)
+                .lineToLinearHeading(new Pose2d(11.79, -36.26, Math.toRadians(90.00)))
+                        .build();
+        Trajectory Park2 = drive.trajectoryBuilder(Park1.end())
+                .lineToLinearHeading(new Pose2d(42, -35.09, Math.toRadians(90.00)))
+                .build();
+        Trajectory Park3 = drive.trajectoryBuilder(Park1.end())
+                .lineToLinearHeading(new Pose2d(68, -37.05, Math.toRadians(90.00)))
+                .build();
+
+        drive.setPoseEstimate(startPose);
+
+        while (opModeInInit() && !isStopRequested())
+        {
+            if (lift.getSTATE() == Lift.STATE.LOOKING_FOR_ZERO) lift.setPower(-0.2);
+            if (lift.limit())
+            {
+                lift.setState(Lift.STATE.IDLE);
+                lift.resetEnc();
+                lift.resetOffset();
+                lift.setPower(0);
+                lift.startEnc();
+            }
+            if(lift.getSTATE() == Lift.STATE.IDLE) {
+                lift.setPosition(30);
+                claw.close();
+                lift.update();
+            }
+            detec.Detect();
+        }
+        drive.followTrajectorySequenceAsync(TrajMove1);
+
+        while (opModeIsActive()&& !isStopRequested()) {
+            switch (state) {
+                case Dep_Traj: {
+                    if(!drive.isBusy()) {
+                        state = State.Park_Traj;
+                        drive.followTrajectorySequenceAsync(Park1);
+                        timer1.reset();
+                    }
+                }
+                break;
+                case Park_Traj: {
+                    if(timer1.seconds()>=0.5) {
+                        if(detec.getCase() == 1) {state=State.Parking;}
+                        else if(detec.getCase()==2) {
+                            drive.followTrajectoryAsync(Park2);
+                            state=State.Parking;
+                        }
+                        else if(detec.getCase()==3) {
+                            drive.followTrajectoryAsync(Park3);
+                            state=State.Parking;
+                        }
+                    }
+                }
+                break;
+                case Parking: {
+                    lift.setPosition(30);
+                }
+            }
+
+
+
+            drive.update();
+            lift.update();
+        }
+    }
+}
